@@ -43,7 +43,7 @@ export default function ModalMap({ onClose }: ModalMapProps) {
   const handleAction = (action: string) => {
     switch (action) {
       case 'theme':
-        setbackground('#000000');
+        setbackground('#0f172a');
         break;
       case 'layers':
         alert('Gerenciador de camadas aberto');
@@ -75,8 +75,7 @@ export default function ModalMap({ onClose }: ModalMapProps) {
   };
 
   const menuOptions = [
-    { id: 'theme', icon: <FaThList />, label: 'Tema', category: 'visualization' },
-    { id: 'layers', icon: <FaLayerGroup />, label: 'Camadas & Legenda', category: 'visualization' },
+    { id: 'theme', icon: <FaThList />, label: 'Tema ' + (isDarkTheme ? 'Claro' : 'Escuro'), category: 'visualization' },
     { id: 'map', icon: <FaMap />, label: 'Configurações do Mapa', category: 'visualization' },
     { id: 'tools', icon: <FaToolbox />, label: 'Ferramentas', category: 'tools' },
     { id: 'print', icon: <FaPrint />, label: 'Imprimir', category: 'tools' },
