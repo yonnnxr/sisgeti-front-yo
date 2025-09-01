@@ -27,6 +27,10 @@ export default function Nav(props: NavProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [showPrintDialog, setShowPrintDialog] = useState(false);
+  const [background, setBackground] = useState('#ffffff');
+
+  // Determina se está no tema escuro
+  const isDarkTheme = background === '#0f172a';
   const buttonRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -144,9 +148,30 @@ export default function Nav(props: NavProps) {
     setActiveTool("info");
   };
 
+  // Listener para mudanças de tema do ModalMap
+  useEffect(() => {
+    const handleThemeChange = (event: CustomEvent) => {
+      const newTheme = event.detail;
+      setBackground(newTheme);
+    };
+
+    // Escuta eventos de mudança de tema
+    window.addEventListener('themeChange', handleThemeChange as EventListener);
+
+    return () => {
+      window.removeEventListener('themeChange', handleThemeChange as EventListener);
+    };
+  }, []);
+
   return (
     <>
-      <nav className="w-full bg-white text-black flex items-center justify-between px-6 py-3 shadow-sm relative">
+      <nav 
+        className="w-full flex items-center justify-between px-6 py-3 shadow-sm relative"
+        style={{
+          backgroundColor: isDarkTheme ? '#0f172a' : '#ffffff',
+          color: isDarkTheme ? '#f8fafc' : '#000000',
+        }}
+      >
         {/* Logo */}
         <div className="flex items-center gap-3">
           <Image
@@ -156,28 +181,48 @@ export default function Nav(props: NavProps) {
             height={80}
             className="rounded-full"
             priority
+            style={{
+              filter: isDarkTheme ? 'invert(1)' : 'none'
+            }}
           />
         </div>
 
         {/* Barra de Pesquisa */}
         <div className="flex-1 max-w-2xl mx-8">
           <div className="relative">
-            <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-600">
-              <FaSearch className="w-5 h-5" />
-            </div>
-            <input
-              type="text"
-              value={searchValue}
-              onChange={handleInputChange}
-              ref={inputRef}
-              placeholder="Pesquisar local ou adicionar mapa..."
-              className="w-full pl-10 pr-12 py-2 bg-white border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-black focus:border-transparent text-black"
-            />
+                    <div 
+          className="absolute left-3 top-1/2 transform -translate-y-1/2"
+          style={{ color: isDarkTheme ? '#64748b' : '#6b7280' }}
+        >
+          <FaSearch className="w-5 h-5" />
+        </div>
+        <input
+          type="text"
+          value={searchValue}
+          onChange={handleInputChange}
+          ref={inputRef}
+          placeholder="Pesquisar local ou adicionar mapa..."
+          className="w-full pl-10 pr-12 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          style={{
+            backgroundColor: isDarkTheme ? '#1e293b' : '#ffffff',
+            borderColor: isDarkTheme ? '#334155' : '#d1d5db',
+            color: isDarkTheme ? '#f8fafc' : '#000000'
+          }}
+        />
             {/* Sugestões fornecidas pelo Google Places Autocomplete */}
             {searchValue && (
               <button
                 onClick={clearSearch}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-600 hover:text-black transition-colors"
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 transition-colors"
+                style={{ 
+                  color: isDarkTheme ? '#64748b' : '#6b7280',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = isDarkTheme ? '#64748b' : '#6b7280';
+                }}
                 aria-label="Limpar busca"
               >
                 <FaTimes className="w-5 h-5" />
@@ -191,10 +236,24 @@ export default function Nav(props: NavProps) {
           {/* Medir distância */}
           <button
             onClick={() => handleToolClick("line")}
-            className={`p-2 rounded-md transition-colors ${activeTool === "line"
-                ? "bg-black text-white border-2 border-black"
-                : "text-black hover:text-white hover:bg-black"
-              }`}
+            className="p-2 rounded-md transition-colors"
+            style={{
+              backgroundColor: activeTool === "line" ? (isDarkTheme ? '#3b82f6' : '#000000') : 'transparent',
+              color: activeTool === "line" ? '#ffffff' : (isDarkTheme ? '#f8fafc' : '#000000'),
+              border: activeTool === "line" ? `2px solid ${isDarkTheme ? '#3b82f6' : '#000000'}` : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTool !== "line") {
+                e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#000000';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#ffffff';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTool !== "line") {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+              }
+            }}
             title="Medir distância"
             aria-pressed={activeTool === "line"}
           >
@@ -207,10 +266,24 @@ export default function Nav(props: NavProps) {
           {/* Medir área */}
           <button
             onClick={() => handleToolClick("area")}
-            className={`p-2 rounded-md transition-colors ${activeTool === "area"
-                ? "bg-black text-white border-2 border-black"
-                : "text-black hover:text-white hover:bg-black"
-              }`}
+            className="p-2 rounded-md transition-colors"
+            style={{
+              backgroundColor: activeTool === "area" ? (isDarkTheme ? '#3b82f6' : '#000000') : 'transparent',
+              color: activeTool === "area" ? '#ffffff' : (isDarkTheme ? '#f8fafc' : '#000000'),
+              border: activeTool === "area" ? `2px solid ${isDarkTheme ? '#3b82f6' : '#000000'}` : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTool !== "area") {
+                e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#000000';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#ffffff';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTool !== "area") {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+              }
+            }}
             title="Medir área"
             aria-pressed={activeTool === "area"}
           >
@@ -223,7 +296,18 @@ export default function Nav(props: NavProps) {
           {/* Impressão */}
           <button
             onClick={handlePrint}
-            className="p-2 text-black hover:text-white hover:bg-black rounded-md transition-colors"
+            className="p-2 rounded-md transition-colors"
+            style={{
+              color: isDarkTheme ? '#f8fafc' : '#000000'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#000000';
+              e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#ffffff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+            }}
             title="Imprimir mapa"
           >
             <FaPrint className="w-6 h-6" />
@@ -232,10 +316,24 @@ export default function Nav(props: NavProps) {
           {/* Informação */}
           <button
             onClick={handleInfo}
-            className={`p-2 rounded-md transition-colors ${activeTool === "info"
-                ? "bg-black text-white border-2 border-black"
-                : "text-black hover:text-white hover:bg-black"
-              }`}
+            className="p-2 rounded-md transition-colors"
+            style={{
+              backgroundColor: activeTool === "info" ? (isDarkTheme ? '#3b82f6' : '#000000') : 'transparent',
+              color: activeTool === "info" ? '#ffffff' : (isDarkTheme ? '#f8fafc' : '#000000'),
+              border: activeTool === "info" ? `2px solid ${isDarkTheme ? '#3b82f6' : '#000000'}` : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTool !== "info") {
+                e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#000000';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#ffffff';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTool !== "info") {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+              }
+            }}
             title="Informações do mapa"
             aria-pressed={activeTool === "info"}
           >
@@ -243,20 +341,53 @@ export default function Nav(props: NavProps) {
           </button>
 
           {/* Zoom */}
-          <div className="flex items-center gap-1 bg-white border border-gray-300 rounded-md p-1">
+          <div 
+            className="flex items-center gap-1 rounded-md p-1"
+            style={{
+              backgroundColor: isDarkTheme ? '#1e293b' : '#ffffff',
+              border: `1px solid ${isDarkTheme ? '#334155' : '#d1d5db'}`
+            }}
+          >
             <button
               onClick={handleZoomOut}
-              className="p-1 text-black hover:text-white hover:bg-black rounded transition-colors"
+              className="p-1 rounded transition-colors"
+              style={{
+                color: isDarkTheme ? '#f8fafc' : '#000000'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = isDarkTheme ? '#3b82f6' : '#000000';
+                e.currentTarget.style.color = isDarkTheme ? '#ffffff' : '#ffffff';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+              }}
               title="Diminuir zoom"
             >
               <FaSearchMinus className="w-4 h-4" />
             </button>
-            <span className="px-2 text-sm text-black font-medium min-w-[3rem] text-center">
+            <span 
+              className="px-2 text-sm font-medium min-w-[3rem] text-center"
+              style={{
+                color: isDarkTheme ? '#f8fafc' : '#000000'
+              }}
+            >
               {zoomLevel}%
             </span>
             <button
               onClick={handleZoomIn}
-              className="p-1 text-black hover:text-white hover:bg-black rounded transition-colors"
+              className="p-1 rounded transition-colors"
+              style={{
+                color: isDarkTheme ? '#f8fafc' : '#000000'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = isDarkTheme ? '#3b82f6' : '#000000';
+                e.currentTarget.style.color = isDarkTheme ? '#ffffff' : '#ffffff';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+              }}
               title="Aumentar zoom"
             >
               <FaSearchPlus className="w-4 h-4" />
@@ -266,10 +397,28 @@ export default function Nav(props: NavProps) {
 
         {/* Botão Map & Tools */}
         <div className="flex items-center gap-2 ml-4 relative">
-          <span className="text-sm font-medium text-black">Mapa & Ferramentas</span>
+          <span 
+            className="text-sm font-medium"
+            style={{
+              color: isDarkTheme ? '#f8fafc' : '#000000'
+            }}
+          >
+            Mapa & Ferramentas
+          </span>
           <button
             ref={buttonRef}
-            className="p-2 text-black hover:text-white hover:bg-black rounded-md transition-colors"
+            className="p-2 rounded-md transition-colors"
+            style={{
+              color: isDarkTheme ? '#f8fafc' : '#000000'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#000000';
+              e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#ffffff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+            }}
             onClick={handleOpenMapTools}
             aria-label="Abrir modal de mapa e ferramentas"
           >

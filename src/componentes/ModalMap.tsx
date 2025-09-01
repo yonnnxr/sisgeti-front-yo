@@ -16,14 +16,17 @@ export default function ModalMap({ onClose }: ModalMapProps) {
     setFilterValue(e.target.value);
   };
 
+  // Determina se está no tema escuro
+  const isDarkTheme = background === '#0f172a';
+
   const setbackground = (color: string) => {
-    const newBg = isDarkTheme ? '#ffffff' : '#000000';
+    const newBg = isDarkTheme ? '#ffffff' : '#0f172a';
     setBackground(newBg);
     document.body.style.backgroundColor = newBg;
+    
+    // Dispara evento para sincronizar com outros componentes
+    window.dispatchEvent(new CustomEvent('themeChange', { detail: newBg }));
   };
-
-  // Determina se está no tema escuro
-  const isDarkTheme = background === '#000000';
 
   const clearFilter = () => {
     setFilterValue("");
@@ -40,7 +43,6 @@ export default function ModalMap({ onClose }: ModalMapProps) {
   const handleAction = (action: string) => {
     switch (action) {
       case 'theme':
-        alert('Configurações de tema abertas');
         setbackground('#000000');
         break;
       case 'layers':
@@ -110,40 +112,49 @@ export default function ModalMap({ onClose }: ModalMapProps) {
         maxHeight: "70vh",
         fontFamily: "inherit",
         backgroundColor: background,
-        color: isDarkTheme ? '#ffffff' : '#111',
-        borderColor: isDarkTheme ? '#333' : '#e5e7eb',
+        color: isDarkTheme ? '#f8fafc' : '#111',
+        borderColor: isDarkTheme ? '#1e293b' : '#e5e7eb',
       }}
     >
       {/* Cabeçalho */}
       <div 
         className="flex items-center justify-between border-b pb-3"
-        style={{ borderColor: isDarkTheme ? '#333' : '#e5e7eb' }}
+        style={{ borderColor: isDarkTheme ? '#1e293b' : '#e5e7eb' }}
       >
         <h3 
           className="text-lg font-semibold"
-          style={{ color: isDarkTheme ? '#ffffff' : '#111' }}
+          style={{ color: isDarkTheme ? '#f8fafc' : '#111' }}
         >
           Mapa & Ferramentas
         </h3>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-            aria-label="Fechar modal"
-          >
-            <FaTimes className="w-5 h-5" />
-          </button>
-        )}
+                 {onClose && (
+           <button
+             onClick={onClose}
+             className="transition-colors"
+             style={{
+               color: isDarkTheme ? '#64748b' : '#9ca3af'
+             }}
+             onMouseEnter={(e) => {
+               e.currentTarget.style.color = isDarkTheme ? '#94a3b8' : '#6b7280';
+             }}
+             onMouseLeave={(e) => {
+               e.currentTarget.style.color = isDarkTheme ? '#64748b' : '#9ca3af';
+             }}
+             aria-label="Fechar modal"
+           >
+             <FaTimes className="w-5 h-5" />
+           </button>
+         )}
       </div>
 
       {/* Barra de filtro */}
       <div 
         className="flex items-center gap-3 border-b pb-3"
-        style={{ borderColor: isDarkTheme ? '#333' : '#e5e7eb' }}
+        style={{ borderColor: isDarkTheme ? '#1e293b' : '#e5e7eb' }}
       >
         <span 
           className="text-lg"
-          style={{ color: isDarkTheme ? '#999' : '#6b7280' }}
+          style={{ color: isDarkTheme ? '#64748b' : '#6b7280' }}
         >
           <FaSearch />
         </span>
@@ -154,20 +165,29 @@ export default function ModalMap({ onClose }: ModalMapProps) {
           placeholder="Filtrar menu..."
           className="flex-1 px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           style={{
-            backgroundColor: isDarkTheme ? '#333' : '#f9fafb',
-            borderColor: isDarkTheme ? '#555' : '#e5e7eb',
-            color: isDarkTheme ? '#ffffff' : '#000000'
+            backgroundColor: isDarkTheme ? '#0f172a' : '#f9fafb',
+            borderColor: isDarkTheme ? '#334155' : '#e5e7eb',
+            color: isDarkTheme ? '#f8fafc' : '#000000'
           }}
         />
-        {filterValue && (
-          <button
-            onClick={clearFilter}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-            aria-label="Limpar filtro"
-          >
-            <FaTimes className="w-4 h-4" />
-          </button>
-        )}
+                 {filterValue && (
+           <button
+             onClick={clearFilter}
+             className="transition-colors"
+             style={{
+               color: isDarkTheme ? '#64748b' : '#9ca3af'
+             }}
+             onMouseEnter={(e) => {
+               e.currentTarget.style.color = isDarkTheme ? '#94a3b8' : '#6b7280';
+             }}
+             onMouseLeave={(e) => {
+               e.currentTarget.style.color = isDarkTheme ? '#64748b' : '#9ca3af';
+             }}
+             aria-label="Limpar filtro"
+           >
+             <FaTimes className="w-4 h-4" />
+           </button>
+         )}
       </div>
 
       {/* Menu de opções organizado por categoria */}
@@ -176,7 +196,7 @@ export default function ModalMap({ onClose }: ModalMapProps) {
           <div key={category} className="mb-4">
             <h4 
               className="text-sm font-medium mb-3 uppercase tracking-wide"
-              style={{ color: isDarkTheme ? '#999' : '#6b7280' }}
+              style={{ color: isDarkTheme ? '#64748b' : '#6b7280' }}
             >
               {categoryLabels[category as keyof typeof categoryLabels]}
             </h4>
@@ -188,10 +208,10 @@ export default function ModalMap({ onClose }: ModalMapProps) {
                   className="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset text-left"
                   style={{
                     backgroundColor: 'transparent',
-                    color: isDarkTheme ? '#ffffff' : '#111',
+                    color: isDarkTheme ? '#f8fafc' : '#111',
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = isDarkTheme ? '#333' : '#f3f4f6';
+                    e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#f3f4f6';
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = 'transparent';
@@ -199,7 +219,7 @@ export default function ModalMap({ onClose }: ModalMapProps) {
                 >
                 <span 
                   className="text-lg flex-shrink-0"
-                  style={{ color: isDarkTheme ? '#ccc' : '#374151' }}
+                  style={{ color: isDarkTheme ? '#94a3b8' : '#374151' }}
                 >
                   {option.icon}
                 </span>
@@ -216,11 +236,11 @@ export default function ModalMap({ onClose }: ModalMapProps) {
       {/* Rodapé */}
       <div 
         className="border-t pt-3"
-        style={{ borderColor: isDarkTheme ? '#333' : '#e5e7eb' }}
+        style={{ borderColor: isDarkTheme ? '#1e293b' : '#e5e7eb' }}
       >
         <div 
           className="text-xs text-center"
-          style={{ color: isDarkTheme ? '#999' : '#6b7280' }}
+          style={{ color: isDarkTheme ? '#64748b' : '#6b7280' }}
         >
           QWC Demo v1.0 • Sistema de Mapeamento Interativo
         </div>
