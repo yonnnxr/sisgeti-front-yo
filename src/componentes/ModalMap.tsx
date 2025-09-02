@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react";
-import { FaSearch, FaThList, FaLayerGroup, FaToolbox, FaPrint, FaQuestionCircle, FaExternalLinkAlt, FaTimes, FaMap, FaCog, FaDownload } from "react-icons/fa";
+import { FaSearch, FaThList, FaToolbox, FaPrint, FaQuestionCircle, FaExternalLinkAlt, FaTimes, FaMap, FaCog, FaDownload, FaFileExport, FaFileImport } from "react-icons/fa";
 
 interface ModalMapProps {
   onClose?: () => void;
@@ -9,7 +9,7 @@ interface ModalMapProps {
 
 export default function ModalMap({ onClose }: ModalMapProps) {
   const [filterValue, setFilterValue] = useState("");
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  // categoria ativa removida por ora
   const [background, setBackground] = useState('#ffffff');
 
   const handleFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -19,11 +19,10 @@ export default function ModalMap({ onClose }: ModalMapProps) {
   // Determina se está no tema escuro
   const isDarkTheme = background === '#0f172a';
 
-  const setbackground = (color: string) => {
+  const toggleBackground = () => {
     const newBg = isDarkTheme ? '#ffffff' : '#0f172a';
     setBackground(newBg);
     document.body.style.backgroundColor = newBg;
-    
     // Dispara evento para sincronizar com outros componentes
     window.dispatchEvent(new CustomEvent('themeChange', { detail: newBg }));
   };
@@ -32,18 +31,12 @@ export default function ModalMap({ onClose }: ModalMapProps) {
     setFilterValue("");
   };
 
-  const handleCategoryClick = (category: string) => {
-    if (activeCategory === category) {
-      setActiveCategory(null);
-    } else {
-      setActiveCategory(category);
-    }
-  };
+  // categoria handler removido (sem uso atual)
 
   const handleAction = (action: string) => {
     switch (action) {
       case 'theme':
-        setbackground('#0f172a');
+  toggleBackground();
         break;
       case 'layers':
         alert('Gerenciador de camadas aberto');
@@ -53,6 +46,16 @@ export default function ModalMap({ onClose }: ModalMapProps) {
         break;
       case 'print':
         window.print();
+        break;
+      case 'export':
+        // Disparar um evento global para o MapViewer exportar as features
+        window.dispatchEvent(new CustomEvent('exportEditLayer'));
+        if (onClose) onClose();
+        break;
+      case 'import':
+        // Disparar um evento global para o MapViewer importar as features
+        window.dispatchEvent(new CustomEvent('importEditLayer'));
+        if (onClose) onClose();
         break;
       case 'help':
         alert('Documentação de ajuda aberta');
@@ -75,10 +78,12 @@ export default function ModalMap({ onClose }: ModalMapProps) {
   };
 
   const menuOptions = [
-    { id: 'theme', icon: <FaThList />, label: 'Tema ' + (isDarkTheme ? 'Claro' : 'Escuro'), category: 'visualization' },
+  { id: 'theme', icon: <FaThList />, label: isDarkTheme ? 'Tema Claro' : 'Tema Escuro', category: 'visualization' },
     { id: 'map', icon: <FaMap />, label: 'Configurações do Mapa', category: 'visualization' },
     { id: 'tools', icon: <FaToolbox />, label: 'Ferramentas', category: 'tools' },
     { id: 'print', icon: <FaPrint />, label: 'Imprimir', category: 'tools' },
+    { id: 'export', icon: <FaFileExport />, label: 'Exportar Features (GeoJSON)', category: 'tools' },
+    { id: 'import', icon: <FaFileImport />, label: 'Importar Features (GeoJSON)', category: 'tools' },
     { id: 'download', icon: <FaDownload />, label: 'Download', category: 'tools' },
     { id: 'settings', icon: <FaCog />, label: 'Configurações', category: 'system' },
     { id: 'help', icon: <FaQuestionCircle />, label: 'Ajuda', category: 'system' },

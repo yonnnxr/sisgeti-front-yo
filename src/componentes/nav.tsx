@@ -1,10 +1,8 @@
 "use client"
 
 import Image from "next/image";
-import { useState, useRef, useEffect } from "react";
-import ModalMap from "./ModalMap";
-import MeasurementTool from "./MeasurementTool";
-import PrintDialog from "./PrintDialog";
+import { useState, useRef, useEffect, useCallback } from "react";
+import ModalMap from "@/componentes/ModalMap";
 import {
   FaSearch,
   FaTimes,
@@ -14,19 +12,22 @@ import {
   FaInfoCircle,
   FaSearchPlus,
   FaSearchMinus,
+  FaMousePointer,
+  FaEdit,
+  FaHome,
 } from "react-icons/fa";
 
 // Tipagem para props futuras (ex: integração com o componente pai)
 interface NavProps {
-  handleSearchChange?: (value: string) => void;
+  // handleSearchChange?: (value: string) => void;
 }
 
 export default function Nav(props: NavProps) {
+  // const { handleSearchChange } = props;
   const [modal, setModal] = useState(false);
   const [searchValue, setSearchValue] = useState("");
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [showPrintDialog, setShowPrintDialog] = useState(false);
   const [background, setBackground] = useState('#ffffff');
 
   // Determina se está no tema escuro
@@ -37,7 +38,9 @@ export default function Nav(props: NavProps) {
   // Autocomplete de lugares do Google no input da barra de busca
   useEffect(() => {
     const initializeAutocomplete = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (!inputRef.current || !(window as any).google?.maps?.places) return;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const autocomplete = new (window as any).google.maps.places.Autocomplete(
         inputRef.current,
         { types: ["geocode"] }
@@ -46,11 +49,12 @@ export default function Nav(props: NavProps) {
         const place = autocomplete.getPlace();
         const value = place?.formatted_address || place?.name || inputRef.current!.value;
         setSearchValue(value);
-        props.handleSearchChange?.(value);
+        // props.handleSearchChange?.(value);
       });
     };
 
-    if (!(window as any).google?.maps?.places) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (!(window as any).google?.maps?.places) {
       const scriptId = "google-maps-places-js";
       let script = document.getElementById(scriptId) as HTMLScriptElement | null;
       if (!script) {
@@ -62,12 +66,13 @@ export default function Nav(props: NavProps) {
         script.onload = initializeAutocomplete;
         document.head.appendChild(script);
       } else {
-        script.addEventListener("load", initializeAutocomplete, { once: true } as any);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    script.addEventListener("load", initializeAutocomplete, { once: true } as any);
       }
     } else {
       initializeAutocomplete();
     }
-  }, [props.handleSearchChange]);
+  }, []);
 
   // Fecha o modal ao clicar fora
   useEffect(() => {
@@ -106,6 +111,34 @@ export default function Nav(props: NavProps) {
   // Alterna o modal
   const handleModal = () => setModal((prev) => !prev);
 
+  // Zoom in/out (memorizados para usar em efeitos)
+  const handleZoomIn = useCallback(() => {
+    const newZoom = Math.min(zoomLevel + 25, 200);
+    setZoomLevel(newZoom);
+    window.dispatchEvent(new CustomEvent("zoomChange", { detail: newZoom }));
+  }, [zoomLevel]);
+
+  const handleZoomOut = useCallback(() => {
+    const newZoom = Math.max(zoomLevel - 25, 25);
+    setZoomLevel(newZoom);
+    window.dispatchEvent(new CustomEvent("zoomChange", { detail: newZoom }));
+  }, [zoomLevel]);
+
+  // Atalhos de teclado: Z = zoom in, X = zoom out, M = abrir modal
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'z') {
+        handleZoomIn();
+      } else if (e.key.toLowerCase() === 'x') {
+        handleZoomOut();
+      } else if (e.key.toLowerCase() === 'm') {
+        setModal(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleZoomIn, handleZoomOut]);
+
   // Limpa o campo de busca
   const clearSearch = () => setSearchValue("");
 
@@ -113,8 +146,16 @@ export default function Nav(props: NavProps) {
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setSearchValue(value);
-    props.handleSearchChange?.(value);
+    // props.handleSearchChange?.(value);
   };
+
+  // Ao apertar Enter no input, dispara evento global de busca (integração com MapViewer)
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      const q = searchValue && searchValue.trim().length > 0 ? searchValue.trim() : 'Campo Grande, MS';
+      window.dispatchEvent(new CustomEvent('searchLocation', { detail: q }));
+    }
+  }
 
 
   // Abre o modal de mapa e ferramentas
@@ -122,30 +163,43 @@ export default function Nav(props: NavProps) {
     handleModal();
   };
 
-  // Alterna ferramentas de medição/informação
+  // Alterna ferramentas
   const handleToolClick = (tool: string) => {
-    setActiveTool((prev) => (prev === tool ? null : tool));
-  };
-
-  // Zoom in/out
-  const handleZoomIn = () => {
-    const newZoom = Math.min(zoomLevel + 25, 200);
-    setZoomLevel(newZoom);
-    window.dispatchEvent(new CustomEvent("zoomChange", { detail: newZoom }));
-  };
-
-  const handleZoomOut = () => {
-    const newZoom = Math.max(zoomLevel - 25, 25);
-    setZoomLevel(newZoom);
-    window.dispatchEvent(new CustomEvent("zoomChange", { detail: newZoom }));
-  };
-
-  // Impressão
-  const handlePrint = () => setShowPrintDialog(true);
-
-  // Informação
-  const handleInfo = () => {
-    setActiveTool("info");
+    // Se a mesma ferramenta for clicada novamente, desativa
+    const newTool = activeTool === tool ? null : tool;
+    setActiveTool(newTool);
+    
+    // Despachar eventos globais para o MapViewer
+    if (tool === "line" || tool === "area") {
+      // Ferramentas de medição
+      const measureType = newTool === "line" ? "line" : (newTool === "area" ? "area" : null);
+      window.dispatchEvent(new CustomEvent('measureTool', { detail: measureType }));
+      // Desativar outras ferramentas
+      if (newTool) {
+        window.dispatchEvent(new CustomEvent('editTool', { detail: null }));
+        window.dispatchEvent(new CustomEvent('selectTool', { detail: false }));
+      }
+    } else if (tool === "select") {
+       // Ferramenta de seleção
+      window.dispatchEvent(new CustomEvent('selectTool', { detail: !!newTool }));
+      // Desativar outras ferramentas
+      if (newTool) {
+        window.dispatchEvent(new CustomEvent('measureTool', { detail: null }));
+        window.dispatchEvent(new CustomEvent('editTool', { detail: null }));
+      }
+    } else if (tool === "edit") {
+      // Ferramenta de edição
+      const editType = newTool ? "Point" : null; // Inicia com Point
+      window.dispatchEvent(new CustomEvent('editTool', { detail: editType }));
+      // Desativar outras ferramentas
+      if (newTool) {
+        window.dispatchEvent(new CustomEvent('measureTool', { detail: null }));
+        window.dispatchEvent(new CustomEvent('selectTool', { detail: false }));
+      }
+    } else if (tool === "home") {
+      // Resetar visualização
+      window.dispatchEvent(new CustomEvent('resetView'));
+    }
   };
 
   // Listener para mudanças de tema do ModalMap
@@ -200,6 +254,7 @@ export default function Nav(props: NavProps) {
           type="text"
           value={searchValue}
           onChange={handleInputChange}
+          onKeyDown={handleInputKeyDown}
           ref={inputRef}
           placeholder="Pesquisar local ou adicionar mapa..."
           className="w-full pl-10 pr-12 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -233,6 +288,60 @@ export default function Nav(props: NavProps) {
 
         {/* Ícones de Ferramentas */}
         <div className="flex items-center gap-4">
+          {/* Selecionar */}
+          <button
+            onClick={() => handleToolClick("select")}
+            className="p-2 rounded-md transition-colors"
+            style={{
+              backgroundColor: activeTool === "select" ? (isDarkTheme ? '#3b82f6' : '#000000') : 'transparent',
+              color: activeTool === "select" ? '#ffffff' : (isDarkTheme ? '#f8fafc' : '#000000'),
+              border: activeTool === "select" ? `2px solid ${isDarkTheme ? '#3b82f6' : '#000000'}` : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTool !== "select") {
+                e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#000000';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#ffffff';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTool !== "select") {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+              }
+            }}
+            title="Selecionar elemento"
+            aria-pressed={activeTool === "select"}
+          >
+            <FaMousePointer className="w-6 h-6" />
+          </button>
+          
+          {/* Editar */}
+          <button
+            onClick={() => handleToolClick("edit")}
+            className="p-2 rounded-md transition-colors"
+            style={{
+              backgroundColor: activeTool === "edit" ? (isDarkTheme ? '#3b82f6' : '#000000') : 'transparent',
+              color: activeTool === "edit" ? '#ffffff' : (isDarkTheme ? '#f8fafc' : '#000000'),
+              border: activeTool === "edit" ? `2px solid ${isDarkTheme ? '#3b82f6' : '#000000'}` : 'none'
+            }}
+            onMouseEnter={(e) => {
+              if (activeTool !== "edit") {
+                e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#000000';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#ffffff';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (activeTool !== "edit") {
+                e.currentTarget.style.backgroundColor = 'transparent';
+                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
+              }
+            }}
+            title="Editar/Desenhar"
+            aria-pressed={activeTool === "edit"}
+          >
+            <FaEdit className="w-6 h-6" />
+          </button>
+          
           {/* Medir distância */}
           <button
             onClick={() => handleToolClick("line")}
@@ -293,9 +402,9 @@ export default function Nav(props: NavProps) {
             </div>
           </button>
 
-          {/* Impressão */}
+          {/* Resetar visualização */}
           <button
-            onClick={handlePrint}
+            onClick={() => handleToolClick("home")}
             className="p-2 rounded-md transition-colors"
             style={{
               color: isDarkTheme ? '#f8fafc' : '#000000'
@@ -308,36 +417,9 @@ export default function Nav(props: NavProps) {
               e.currentTarget.style.backgroundColor = 'transparent';
               e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
             }}
-            title="Imprimir mapa"
+            title="Resetar visualização"
           >
-            <FaPrint className="w-6 h-6" />
-          </button>
-
-          {/* Informação */}
-          <button
-            onClick={handleInfo}
-            className="p-2 rounded-md transition-colors"
-            style={{
-              backgroundColor: activeTool === "info" ? (isDarkTheme ? '#3b82f6' : '#000000') : 'transparent',
-              color: activeTool === "info" ? '#ffffff' : (isDarkTheme ? '#f8fafc' : '#000000'),
-              border: activeTool === "info" ? `2px solid ${isDarkTheme ? '#3b82f6' : '#000000'}` : 'none'
-            }}
-            onMouseEnter={(e) => {
-              if (activeTool !== "info") {
-                e.currentTarget.style.backgroundColor = isDarkTheme ? '#1e293b' : '#000000';
-                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#ffffff';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (activeTool !== "info") {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = isDarkTheme ? '#f8fafc' : '#000000';
-              }
-            }}
-            title="Informações do mapa"
-            aria-pressed={activeTool === "info"}
-          >
-            <FaInfoCircle className="w-6 h-6" />
+            <FaHome className="w-6 h-6" />
           </button>
 
           {/* Zoom */}
@@ -442,37 +524,6 @@ export default function Nav(props: NavProps) {
           )}
         </div>
       </nav>
-
-      {/* Ferramentas de Medição */}
-      {(activeTool === "line" || activeTool === "area") && (
-        <MeasurementTool
-          type={activeTool as "line" | "area"}
-          isActive={true}
-          onClose={() => setActiveTool(null)}
-        />
-      )}
-
-      {/* Indicador de Ferramenta Ativa */}
-      {activeTool === "info" && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 bg-black text-white px-4 py-2 rounded-lg shadow-lg z-50 flex items-center">
-          <span className="text-sm font-medium">
-            Ferramenta de informação ativada
-          </span>
-          <button
-            onClick={() => setActiveTool(null)}
-            className="ml-3 text-white hover:text-gray-300"
-            aria-label="Fechar informação"
-          >
-            <FaTimes className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Diálogo de Impressão */}
-      <PrintDialog
-        isOpen={showPrintDialog}
-        onClose={() => setShowPrintDialog(false)}
-      />
     </>
   );
 }
