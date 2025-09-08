@@ -24,3 +24,15 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Estilos de impressão */
+@media print {
+  .no-print { display: none !important; }
+  body, html { background: #ffffff !important; }
+}
+
+/* Tamanho padrão A0 landscape; navegadores podem ajustar conforme diálogo */
+@page {
+  size: A0 landscape;
+  margin: 10mm;
+}

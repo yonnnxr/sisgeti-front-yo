@@ -38,14 +38,24 @@ export default function ModalMap({ onClose }: ModalMapProps) {
       case 'theme':
   toggleBackground();
         break;
+      case 'geoprocessing':
+        window.dispatchEvent(new CustomEvent('openGeoprocessing'));
+        if (onClose) onClose();
+        break;
+      case 'analytics':
+        window.dispatchEvent(new CustomEvent('openAnalytics'));
+        if (onClose) onClose();
+        break;
       case 'layers':
-        alert('Gerenciador de camadas aberto');
+        window.dispatchEvent(new CustomEvent('focusLayerManager'));
+        if (onClose) onClose();
         break;
       case 'tools':
-        alert('Painel de ferramentas aberto');
+        window.dispatchEvent(new CustomEvent('clearTools'));
+        if (onClose) onClose();
         break;
       case 'print':
-        window.print();
+        window.dispatchEvent(new CustomEvent('openPrintDialog'));
         break;
       case 'export':
         // Disparar um evento global para o MapViewer exportar as features
@@ -58,19 +68,23 @@ export default function ModalMap({ onClose }: ModalMapProps) {
         if (onClose) onClose();
         break;
       case 'help':
-        alert('Documentação de ajuda aberta');
+        window.dispatchEvent(new CustomEvent('openHelpDialog'));
+        if (onClose) onClose();
         break;
       case 'external':
         window.open('https://docs.qgis.org/', '_blank');
         break;
       case 'map':
-        alert('Configurações do mapa abertas');
+        window.dispatchEvent(new CustomEvent('openSettingsDialog', { detail: { type: 'map' } }));
+        if (onClose) onClose();
         break;
       case 'settings':
-        alert('Configurações gerais abertas');
+        window.dispatchEvent(new CustomEvent('openSettingsDialog', { detail: { type: 'general' } }));
+        if (onClose) onClose();
         break;
       case 'download':
-        alert('Download de dados iniciado');
+        window.dispatchEvent(new CustomEvent('exportMapPNG'));
+        if (onClose) onClose();
         break;
       default:
         break;
@@ -80,7 +94,9 @@ export default function ModalMap({ onClose }: ModalMapProps) {
   const menuOptions = [
   { id: 'theme', icon: <FaThList />, label: isDarkTheme ? 'Tema Claro' : 'Tema Escuro', category: 'visualization' },
     { id: 'map', icon: <FaMap />, label: 'Configurações do Mapa', category: 'visualization' },
-    { id: 'tools', icon: <FaToolbox />, label: 'Ferramentas', category: 'tools' },
+    { id: 'tools', icon: <FaToolbox />, label: 'Limpar Ferramentas', category: 'tools' },
+    { id: 'geoprocessing', icon: <FaToolbox />, label: 'Geoprocessamento', category: 'tools' },
+    { id: 'analytics', icon: <FaToolbox />, label: 'Geo BI (Estatísticas)', category: 'tools' },
     { id: 'print', icon: <FaPrint />, label: 'Imprimir', category: 'tools' },
     { id: 'export', icon: <FaFileExport />, label: 'Exportar Features (GeoJSON)', category: 'tools' },
     { id: 'import', icon: <FaFileImport />, label: 'Importar Features (GeoJSON)', category: 'tools' },

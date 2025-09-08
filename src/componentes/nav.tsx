@@ -35,43 +35,66 @@ export default function Nav(props: NavProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Autocomplete de lugares do Google no input da barra de busca
-  useEffect(() => {
-    const initializeAutocomplete = () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (!inputRef.current || !(window as any).google?.maps?.places) return;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const autocomplete = new (window as any).google.maps.places.Autocomplete(
-        inputRef.current,
-        { types: ["geocode"] }
-      );
-      autocomplete.addListener("place_changed", () => {
-        const place = autocomplete.getPlace();
-        const value = place?.formatted_address || place?.name || inputRef.current!.value;
-        setSearchValue(value);
-        // props.handleSearchChange?.(value);
-      });
-    };
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+  const suggestionsAbortRef = useRef<AbortController | null>(null);
+  const [suggestions, setSuggestions] = useState<Array<any>>([]);
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const [highlightTools, setHighlightTools] = useState(false);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (!(window as any).google?.maps?.places) {
-      const scriptId = "google-maps-places-js";
-      let script = document.getElementById(scriptId) as HTMLScriptElement | null;
-      if (!script) {
-        script = document.createElement("script");
-        script.id = scriptId;
-        script.async = true;
-        script.defer = true;
-        script.src = `https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places`;
-        script.onload = initializeAutocomplete;
-        document.head.appendChild(script);
-      } else {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    script.addEventListener("load", initializeAutocomplete, { once: true } as any);
-      }
-    } else {
-      initializeAutocomplete();
+  // Sugestões de locais via Nominatim (OSM) com debounce
+  useEffect(() => {
+    const q = searchValue.trim();
+    if (q.length < 3) {
+      setSuggestions([]);
+      setIsSuggestionsOpen(false);
+      setHighlightIndex(-1);
+      return;
     }
+
+    // Abortar chamadas anteriores
+    suggestionsAbortRef.current?.abort();
+    const controller = new AbortController();
+    suggestionsAbortRef.current = controller;
+
+    const timeoutId: number = window.setTimeout(async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
+        const resp = await fetch(url, {
+          headers: { 'Accept-Language': 'pt-BR' },
+          signal: controller.signal,
+        });
+        const data = await resp.json();
+        const items = Array.isArray(data) ? data : [];
+        setSuggestions(items);
+        setIsSuggestionsOpen(items.length > 0);
+        setHighlightIndex(-1);
+      } catch (err) {
+        // Ignorar abortos; fechar dropdown em demais erros
+        if ((err as any)?.name !== 'AbortError') {
+          setSuggestions([]);
+          setIsSuggestionsOpen(false);
+          setHighlightIndex(-1);
+        }
+      }
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [searchValue]);
+
+  // Fechar sugestões ao clicar fora do container de busca
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setIsSuggestionsOpen(false);
+        setHighlightIndex(-1);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   // Fecha o modal ao clicar fora
@@ -149,11 +172,41 @@ export default function Nav(props: NavProps) {
     // props.handleSearchChange?.(value);
   };
 
-  // Ao apertar Enter no input, dispara evento global de busca (integração com MapViewer)
+  const selectSuggestion = (s: any) => {
+    const label = s?.display_name || '';
+    if (!label) return;
+    setSearchValue(label);
+    window.dispatchEvent(new CustomEvent('searchLocation', { detail: label }));
+    setIsSuggestionsOpen(false);
+    setHighlightIndex(-1);
+  };
+
+  // Ao apertar Enter/Setas no input, dispara busca ou navega nas sugestões
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown' && isSuggestionsOpen && suggestions.length > 0) {
+      e.preventDefault();
+      setHighlightIndex(prev => Math.min(prev + 1, suggestions.length - 1));
+      return;
+    }
+    if (e.key === 'ArrowUp' && isSuggestionsOpen && suggestions.length > 0) {
+      e.preventDefault();
+      setHighlightIndex(prev => Math.max(prev - 1, 0));
+      return;
+    }
     if (e.key === 'Enter') {
+      if (isSuggestionsOpen && highlightIndex >= 0 && highlightIndex < suggestions.length) {
+        selectSuggestion(suggestions[highlightIndex]);
+        return;
+      }
       const q = searchValue && searchValue.trim().length > 0 ? searchValue.trim() : 'Campo Grande, MS';
       window.dispatchEvent(new CustomEvent('searchLocation', { detail: q }));
+      setIsSuggestionsOpen(false);
+      setHighlightIndex(-1);
+      return;
+    }
+    if (e.key === 'Escape') {
+      setIsSuggestionsOpen(false);
+      setHighlightIndex(-1);
     }
   }
 
@@ -202,6 +255,30 @@ export default function Nav(props: NavProps) {
     }
   };
 
+  // Destaque visual quando o item "Ferramentas" for acionado no ModalMap
+  const toolsContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handleFocusTools = () => {
+      // fechar o modal (caso esteja aberto) e destacar a área de ferramentas
+      setModal(false);
+      setHighlightTools(true);
+      try {
+        toolsContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      } catch {}
+      setTimeout(() => setHighlightTools(false), 1200);
+    };
+    window.addEventListener('focusTools', handleFocusTools);
+    const handleClearTools = () => {
+      // sincroniza com ação de limpar ferramentas
+      setActiveTool(null);
+    };
+    window.addEventListener('clearTools', handleClearTools);
+    return () => {
+      window.removeEventListener('focusTools', handleFocusTools);
+      window.removeEventListener('clearTools', handleClearTools);
+    };
+  }, []);
+
   // Listener para mudanças de tema do ModalMap
   useEffect(() => {
     const handleThemeChange = (event: CustomEvent) => {
@@ -243,7 +320,7 @@ export default function Nav(props: NavProps) {
 
         {/* Barra de Pesquisa */}
         <div className="flex-1 max-w-2xl mx-8">
-          <div className="relative">
+          <div className="relative" ref={searchContainerRef}>
                     <div 
           className="absolute left-3 top-1/2 transform -translate-y-1/2"
           style={{ color: isDarkTheme ? '#64748b' : '#6b7280' }}
@@ -264,7 +341,35 @@ export default function Nav(props: NavProps) {
             color: isDarkTheme ? '#f8fafc' : '#000000'
           }}
         />
-            {/* Sugestões fornecidas pelo Google Places Autocomplete */}
+            {/* Sugestões (Nominatim) */}
+            {isSuggestionsOpen && suggestions.length > 0 && (
+              <ul
+                role="listbox"
+                className="absolute z-50 mt-1 w-full max-h-60 overflow-auto border rounded-md shadow-sm"
+                style={{
+                  backgroundColor: isDarkTheme ? '#1e293b' : '#ffffff',
+                  borderColor: isDarkTheme ? '#334155' : '#d1d5db',
+                  color: isDarkTheme ? '#f8fafc' : '#000000'
+                }}
+              >
+                {suggestions.map((s, idx) => (
+                  <li
+                    key={`${s.place_id || s.osm_id || idx}`}
+                    role="option"
+                    aria-selected={highlightIndex === idx}
+                    className="px-3 py-2 cursor-pointer"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => selectSuggestion(s)}
+                    onMouseEnter={() => setHighlightIndex(idx)}
+                    style={{
+                      backgroundColor: highlightIndex === idx ? (isDarkTheme ? '#0f172a' : '#f3f4f6') : 'transparent'
+                    }}
+                  >
+                    {s.display_name}
+                  </li>
+                ))}
+              </ul>
+            )}
             {searchValue && (
               <button
                 onClick={clearSearch}
@@ -287,7 +392,16 @@ export default function Nav(props: NavProps) {
         </div>
 
         {/* Ícones de Ferramentas */}
-        <div className="flex items-center gap-4">
+        <div
+          ref={toolsContainerRef}
+          className="flex items-center gap-4"
+          style={{
+            outline: highlightTools ? (isDarkTheme ? '#3b82f6 solid 2px' : '#000000 solid 2px') : 'none',
+            outlineOffset: highlightTools ? 4 : 0,
+            borderRadius: 8,
+            transition: 'outline-color 0.2s ease, outline-offset 0.2s ease'
+          }}
+        >
           {/* Selecionar */}
           <button
             onClick={() => handleToolClick("select")}
