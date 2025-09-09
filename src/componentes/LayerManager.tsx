@@ -33,8 +33,6 @@ interface LayerManagerProps {
   onUpdateStyle?: (id: string, style: LayerStyle) => void;
   onClusterDistanceChange?: (id: string, distance: number) => void;
   onToggleHeatmap?: (id: string) => void;
-  onSimplifyLayer?: (id: string) => void;
-  onApplyWmsFilter?: (id: string, cql: string) => void;
   onApplyGeoAttributeFilter?: (id: string, query: string) => void;
   isDark?: boolean;
   highlight?: boolean;
@@ -60,7 +58,6 @@ export default function LayerManager({
   onUpdateStyle,
   onClusterDistanceChange,
   onToggleHeatmap,
-  onApplyWmsFilter,
   onApplyGeoAttributeFilter,
   isDark = false,
   highlight = false,
@@ -75,9 +72,7 @@ export default function LayerManager({
   const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'visible' | 'hidden'>('all');
   const [minOpacity, setMinOpacity] = useState(0);
   const [sortKey, setSortKey] = useState<'name' | 'type' | 'opacity'>('name');
-  const [wmsFilterById, setWmsFilterById] = useState<Record<string, string>>({});
   const [geoFilterById, setGeoFilterById] = useState<Record<string, string>>({});
-  const [heatmapWeightById, setHeatmapWeightById] = useState<Record<string, string>>({});
   const [filterBuilderFor, setFilterBuilderFor] = useState<string | null>(null);
   const [pgCatalog, setPgCatalog] = useState<Array<{ schema: string; table: string; geom: string; srid: number; type: string }>>([]);
   const [pgLoading, setPgLoading] = useState(false);
@@ -827,68 +822,10 @@ export default function LayerManager({
                           Limpar
                         </button>
                       </div>
-                      {/* Peso de Heatmap (0-1): field:value, ex: densidade; min/max opcionais: campo[min,max] */}
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={heatmapWeightById[layer.id] || ''}
-                          onChange={(e) => setHeatmapWeightById(prev => ({ ...prev, [layer.id]: e.target.value }))}
-                          placeholder="Peso heatmap: campo|min,max (ex: valor|0,100)"
-                          className={`px-2 py-1 text-xs rounded border ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white border-gray-300'}`}
-                        />
-                        <button
-                          onClick={() => {
-                            const raw = (heatmapWeightById[layer.id] || '').trim();
-                            if (!raw) { window.dispatchEvent(new CustomEvent('applyHeatmapWeight', { detail: { id: layer.id, spec: null } })); return; }
-                            const [field, range] = raw.split('|');
-                            let min: number | undefined; let max: number | undefined;
-                            if (range) {
-                              const p = range.split(',').map(s => Number(s.trim()));
-                              if (p.length === 2 && p.every(v => Number.isFinite(v))) { min = p[0]; max = p[1]; }
-                            }
-                            window.dispatchEvent(new CustomEvent('applyHeatmapWeight', { detail: { id: layer.id, spec: { type: 'field', field: field.trim(), normalize: { min, max } } } }));
-                          }}
-                          className={`px-2 py-1 text-xs rounded ${isDark ? 'bg-slate-600 text-slate-100 hover:bg-slate-500' : 'bg-gray-200 hover:bg-gray-300'}`}
-                        >
-                          Aplicar peso
-                        </button>
-                      </div>
-                      {/* Filtro espacial pela extensão atual do mapa */}
-                      <button
-                        onClick={() => window.dispatchEvent(new CustomEvent('filterByViewport', { detail: { id: layer.id } }))}
-                        className={`px-2 py-1 text-xs rounded ${isDark ? 'bg-slate-600 text-slate-100 hover:bg-slate-500' : 'bg-gray-200 hover:bg-gray-300'}`}
-                        title="Filtrar por extensão atual do mapa"
-                      >
-                        Filtro por Extensão
-                      </button>
+                      {/* Heatmap/Viewport removidos conforme solicitação */}
                     </div>
                   )}
-                  {layer.type === 'WMS' && (
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={wmsFilterById[layer.id] || ''}
-                          onChange={(e) => setWmsFilterById(prev => ({ ...prev, [layer.id]: e.target.value }))}
-                          placeholder="CQL_FILTER"
-                          className={`px-2 py-1 text-xs rounded border ${isDark ? 'bg-slate-600 border-slate-500 text-slate-100' : 'bg-white border-gray-300'}`}
-                        />
-                        <button
-                          onClick={() => onApplyWmsFilter?.(layer.id, wmsFilterById[layer.id] || '')}
-                          className={`px-2 py-1 text-xs rounded ${isDark ? 'bg-slate-600 text-slate-100 hover:bg-slate-500' : 'bg-gray-200 hover:bg-gray-300'}`}
-                        >
-                          Aplicar CQL
-                        </button>
-                      </div>
-                      <button
-                        onClick={() => setFilterBuilderFor(layer.id)}
-                        className={`px-2 py-1 text-xs rounded flex items-center gap-1 ${isDark ? 'bg-slate-600 text-slate-100 hover:bg-slate-500' : 'bg-gray-200 hover:bg-gray-300'}`}
-                        title="Abrir construtor de filtros"
-                      >
-                        <FaFilter /> Avançado
-                      </button>
-                    </div>
-                  )}
+                  {/* CQL WMS removido conforme solicitação */}
                 </div>
               </div>
             );

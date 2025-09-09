@@ -10,6 +10,7 @@ import TileLayer from 'ol/layer/Tile';
 import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
 import { intersects } from 'ol/extent';
+// Heatmap removido do UI, mas mantido suporte interno caso necessário futuramente
 import Heatmap from 'ol/layer/Heatmap';
 import { fromLonLat } from 'ol/proj';
 import { defaults as defaultControls } from 'ol/control';
@@ -26,7 +27,7 @@ import VectorSource from 'ol/source/Vector';
 import { Layer } from 'ol/layer';
 import { Circle as CircleStyle, Fill, Stroke, Style, Text as TextStyle } from 'ol/style';
 import { Draw, Select, Modify, Snap } from 'ol/interaction';
-import { LineString, Polygon } from 'ol/geom';
+import { LineString, Polygon, Point } from 'ol/geom';
 import { getLength, getArea } from 'ol/sphere';
 import GeoJSON from 'ol/format/GeoJSON';
 import { makeWeighter, WeightSpec } from '@/utils/heatmap';
@@ -36,7 +37,7 @@ import { idbSetGeoJSON, idbGetGeoJSON, idbDeleteGeoJSON } from '@/utils/idb';
 import { normalizeText, tokenize, matchAllTokens } from '@/utils/filter';
 import { compilePredicate, CompiledPredicate } from '@/utils/predicate';
 import { runUnaryOperationInWorker } from '@/utils/geoprocessing';
-import { Feature } from 'ol';
+import Feature from 'ol/Feature';
 import { EventsKey } from 'ol/events';
 import Cluster from 'ol/source/Cluster';
 
@@ -181,6 +182,7 @@ export default function MapViewer() {
   // Cache para mapear ID da camada do app com a camada do OL
   const layerCacheRef = useRef<Record<string, Layer>>({});
   const heatmapCacheRef = useRef<Record<string, Heatmap>>({});
+  const derivedPointSourceCacheRef = useRef<Record<string, VectorSource>>({});
   // Cache para fontes de cluster (quando aplicável)
   const clusterSourceCacheRef = useRef<Record<string, Cluster>>({});
   // Peso do heatmap por camada
@@ -539,9 +541,6 @@ export default function MapViewer() {
     if (!spec) { (heat as any).setWeight ? (heat as any).setWeight(undefined) : null; return; }
     const weightFn = makeWeighter(spec);
     try {
-      // OpenLayers Heatmap aceita uma função weight via feature.get('weight') ou style function
-      // Use setWeight para apontar uma função que lê a propriedade 'weight'
-      // Aqui atribuiremos 'weight' nas features do source
       const src = heat.getSource();
       const feats = src?.getFeatures?.() || [];
       for (const f of feats) {
@@ -570,12 +569,9 @@ export default function MapViewer() {
   // Heatmap weights application
   function applyHeatmapWeightsToSource(src: any, spec: WeightSpec | null) {
     try {
+      if (!spec) return; // não tocar nas features quando não há spec, usar weight default 1
       const feats = src?.getFeatures?.() || [];
       if (!Array.isArray(feats)) return;
-      if (!spec) {
-        feats.forEach((f: any) => { try { f.set('weight', 1); } catch {} });
-        return;
-      }
       const weightFn = makeWeighter(spec);
       feats.forEach((f: any) => {
         try {
@@ -1220,7 +1216,7 @@ export default function MapViewer() {
     window.addEventListener('exportMapPNG', handleExportMapPng);
     window.addEventListener('resetView', handleResetViewEvent);
     window.addEventListener('toggleIdentify', handleToggleIdentify as EventListener);
-    // novo: aplicar peso de heatmap
+    // remover filtro por viewport (solicitado)
     const onFilterByViewport = (ev: Event) => {
       try {
         const { id } = (ev as CustomEvent).detail || {};
@@ -1244,7 +1240,7 @@ export default function MapViewer() {
         setLayers(prev => prev.map(l => l.id === id ? { ...l, featureCount: filtered.length } : l));
       } catch {}
     };
-    window.addEventListener('filterByViewport' as any, onFilterByViewport as any);
+    // Listener para aplicação de peso no heatmap
     const onApplyHeatWeight = (ev: Event) => {
       try {
         const { id, spec } = (ev as CustomEvent).detail || {};
@@ -1285,8 +1281,8 @@ export default function MapViewer() {
       window.removeEventListener('resetView', handleResetViewEvent);
       window.removeEventListener('toggleIdentify', handleToggleIdentify as EventListener);
       window.removeEventListener('clearTools', handleClearTools);
-      window.removeEventListener('applyHeatmapWeight' as any, onApplyHeatWeight as any);
-      window.removeEventListener('filterByViewport' as any, onFilterByViewport as any);
+      try { window.removeEventListener('filterByViewport' as any, onFilterByViewport as any); } catch {}
+      try { window.removeEventListener('applyHeatmapWeight' as any, onApplyHeatWeight as any); } catch {}
     };
   }, []);
 
@@ -1907,46 +1903,77 @@ export default function MapViewer() {
           if (existing) {
             map.removeLayer(existing);
             delete heatmapCacheRef.current[id];
+            try { delete derivedPointSourceCacheRef.current[id]; } catch {}
             return;
           }
           const srcAny: any = (baseLayer as VectorLayer<any>).getSource();
           const src = (srcAny && typeof srcAny.getSource === 'function') ? srcAny.getSource() : srcAny;
           if (!src) return;
-          // Aplicar pesos atuais (se houver)
+          // Garantir fonte de pontos para o Heatmap (centroides para não-pontos)
+          let heatmapSource: VectorSource = src;
+          try {
+            const feats = src.getFeatures ? src.getFeatures() : [];
+            const total = Array.isArray(feats) ? feats.length : 0;
+            console.log('[Heatmap] total features base:', total);
+            // Sem hard-stop: deixar ativar heatmap. Para não-pontos, reduzimos via amostragem abaixo
+            const sample = feats.slice(0, Math.min(20, total));
+            const isAllPoints = sample.length > 0 && sample.every((f: any) => f?.getGeometry?.()?.getType?.() === 'Point');
+            if (!isAllPoints) {
+              // construir fonte derivada de pontos (centroides)
+              const derived = new VectorSource();
+              const MAX_DERIVED = 20000;
+              // amostragem aleatória uniforme para reduzir bloqueio
+              let list: any[] = [];
+              if (total <= MAX_DERIVED) list = feats;
+              else {
+                const step = Math.max(1, Math.floor(total / MAX_DERIVED));
+                for (let i = 0; i < total && list.length < MAX_DERIVED; i += step) list.push(feats[i]);
+              }
+              for (const f of list) {
+                try {
+                  const g = f.getGeometry?.();
+                  if (!g) continue;
+                  const e = g.getExtent?.();
+                  if (!e) continue;
+                  const cx = (e[0] + e[2]) / 2;
+                  const cy = (e[1] + e[3]) / 2;
+                  const nf = new Feature(new Point([cx, cy]));
+                  // peso inicial 1 para evitar NaN
+                  try { (nf as any).set('weight', 1); } catch {}
+                  derived.addFeature(nf);
+                } catch {}
+              }
+              heatmapSource = derived;
+              derivedPointSourceCacheRef.current[id] = derived;
+              console.log('[Heatmap] derived points:', (derived as any).getFeatures?.()?.length || 0);
+            }
+          } catch {}
           try {
             const spec = heatmapWeightSpecRef.current[id] || null;
-            applyHeatmapWeightsToSource(src, spec);
+            if (spec) {
+              // aplicar de forma assíncrona para não bloquear o thread
+              setTimeout(() => {
+                try { applyHeatmapWeightsToSource(heatmapSource, spec); } catch (e) { console.error('[Heatmap] peso async erro:', e); }
+              }, 0);
+            }
           } catch {}
-          const heat = new Heatmap({ source: src, blur: 12, radius: 8, zIndex: 49 });
+          const heat = new Heatmap({ 
+            source: heatmapSource as any, 
+            blur: 12, 
+            radius: 8, 
+            zIndex: 49,
+            // usar função explícita para ler peso
+            weight: (feature: any) => {
+              const w = Number(feature?.get?.('weight'));
+              return Number.isFinite(w) ? Math.max(0, Math.min(1, w)) : 1;
+            }
+          } as any);
           heatmapCacheRef.current[id] = heat;
           map.addLayer(heat);
         }}
         isDark={isDarkTheme}
         highlight={highlightLayerManager}
-        onApplyWmsFilter={applyWmsFilter}
         onApplyGeoAttributeFilter={applyGeoAttributeFilter}
-        onSimplifyLayer={async (id: string) => {
-          try {
-            const olLayer = layerCacheRef.current[id];
-            if (!mapInstance.current || !(olLayer instanceof VectorLayer)) return;
-            const srcAny: any = (olLayer as VectorLayer<any>).getSource();
-            const src = (srcAny && typeof srcAny.getSource === 'function') ? srcAny.getSource() : srcAny;
-            const feats = src?.getFeatures?.() || [];
-            if (feats.length === 0) return;
-            const tol = 5; // metros
-            const simplified = await runUnaryOperationInWorker(feats, 'simplify', { tolerance: tol, highQuality: false });
-            // Atualiza camada OL
-            src.clear();
-            src.addFeatures(simplified as any);
-            // Persiste no IDB
-            const fmt = new GeoJSON();
-            const obj = fmt.writeFeaturesObject(simplified as any, { featureProjection: 'EPSG:3857', dataProjection: 'EPSG:4326' });
-            await idbSetGeoJSON(id, obj as any);
-          } catch (e) {
-            console.error('Falha ao simplificar camada:', e);
-            alert('Falha ao simplificar camada.');
-          }
-        }}
       />
 
       {/* Painel de Geoprocessamento */}
