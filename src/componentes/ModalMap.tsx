@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react";
+import { useMemo, useState, useCallback } from "react";
 import { FaSearch, FaThList, FaToolbox, FaPrint, FaQuestionCircle, FaExternalLinkAlt, FaTimes, FaMap, FaCog, FaDownload, FaFileExport, FaFileImport } from "react-icons/fa";
+import useOptimizedFilter from "../utils/useOptimizedFilter";
 
 interface ModalMapProps {
   onClose?: () => void;
@@ -47,7 +48,7 @@ export default function ModalMap({ onClose }: ModalMapProps) {
         if (onClose) onClose();
         break;
       case 'layers':
-        window.dispatchEvent(new CustomEvent('focusLayerManager'));
+        window.dispatchEvent(new CustomEvent('openLayerManager'));
         if (onClose) onClose();
         break;
       case 'tools':
@@ -63,7 +64,13 @@ export default function ModalMap({ onClose }: ModalMapProps) {
         if (onClose) onClose();
         break;
       case 'import':
-        // Disparar um evento global para o MapViewer importar as features
+        // Abrir Gerenciador de Camadas diretamente no formulário de adição (GeoJSON/WMS)
+        window.dispatchEvent(new CustomEvent('openLayerManager'));
+        window.dispatchEvent(new CustomEvent('openLayerAddForm'));
+        if (onClose) onClose();
+        break;
+      case 'importEdit':
+        // Importar para a camada de Edição (fluxo anterior)
         window.dispatchEvent(new CustomEvent('importEditLayer'));
         if (onClose) onClose();
         break;
@@ -98,17 +105,17 @@ export default function ModalMap({ onClose }: ModalMapProps) {
     { id: 'geoprocessing', icon: <FaToolbox />, label: 'Geoprocessamento', category: 'tools' },
     { id: 'analytics', icon: <FaToolbox />, label: 'Geo BI (Estatísticas)', category: 'tools' },
     { id: 'print', icon: <FaPrint />, label: 'Imprimir', category: 'tools' },
-    { id: 'export', icon: <FaFileExport />, label: 'Exportar Features (GeoJSON)', category: 'tools' },
-    { id: 'import', icon: <FaFileImport />, label: 'Importar Features (GeoJSON)', category: 'tools' },
+    { id: 'export', icon: <FaFileExport />, label: 'Exportar p/ Edição (GeoJSON)', category: 'tools' },
+    { id: 'import', icon: <FaFileImport />, label: 'Adicionar Camada (WMS/GeoJSON)', category: 'tools' },
+    { id: 'importEdit', icon: <FaFileImport />, label: 'Importar p/ Edição (GeoJSON)', category: 'tools' },
     { id: 'download', icon: <FaDownload />, label: 'Download', category: 'tools' },
     { id: 'settings', icon: <FaCog />, label: 'Configurações', category: 'system' },
     { id: 'help', icon: <FaQuestionCircle />, label: 'Ajuda', category: 'system' },
     { id: 'external', icon: <FaExternalLinkAlt />, label: 'Documentação', category: 'system' },
   ];
 
-  const filteredOptions = menuOptions.filter(option =>
-    option.label.toLowerCase().includes(filterValue.toLowerCase())
-  );
+  const getOptionFields = useCallback((o: typeof menuOptions[number]) => [o.label, o.category], []);
+  const { filtered: filteredOptions } = useOptimizedFilter(menuOptions, filterValue, getOptionFields);
 
   const groupedOptions = filteredOptions.reduce((acc, option) => {
     if (!acc[option.category]) {
@@ -262,7 +269,7 @@ export default function ModalMap({ onClose }: ModalMapProps) {
           className="text-xs text-center"
           style={{ color: isDarkTheme ? '#64748b' : '#6b7280' }}
         >
-          QWC Demo v1.0 • Sistema de Mapeamento Interativo
+          SISGETI Demo v1.0 • Sistema de Mapeamento Interativo
         </div>
       </div>
     </div>

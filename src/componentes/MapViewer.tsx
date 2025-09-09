@@ -9,6 +9,7 @@ import View from 'ol/View';
 import TileLayer from 'ol/layer/Tile';
 import OSM from 'ol/source/OSM';
 import XYZ from 'ol/source/XYZ';
+import { intersects } from 'ol/extent';
 import Heatmap from 'ol/layer/Heatmap';
 import { fromLonLat } from 'ol/proj';
 import { defaults as defaultControls } from 'ol/control';
@@ -28,9 +29,12 @@ import { Draw, Select, Modify, Snap } from 'ol/interaction';
 import { LineString, Polygon } from 'ol/geom';
 import { getLength, getArea } from 'ol/sphere';
 import GeoJSON from 'ol/format/GeoJSON';
+import { makeWeighter, WeightSpec } from '@/utils/heatmap';
 import proj4 from 'proj4';
 import { register as registerProj4 } from 'ol/proj/proj4';
 import { idbSetGeoJSON, idbGetGeoJSON, idbDeleteGeoJSON } from '@/utils/idb';
+import { normalizeText, tokenize, matchAllTokens } from '@/utils/filter';
+import { compilePredicate, CompiledPredicate } from '@/utils/predicate';
 import { runUnaryOperationInWorker } from '@/utils/geoprocessing';
 import { Feature } from 'ol';
 import { EventsKey } from 'ol/events';
@@ -56,10 +60,20 @@ interface AppLayer {
   visible: boolean;
   opacity: number;
   featureCount?: number;
+  style?: LayerStyle;
 }
 
 type GeometryType = 'Point' | 'LineString' | 'Polygon';
 type MeasureType = 'line' | 'area' | null;
+
+// Estilo por camada
+interface LayerStyle {
+  strokeColor?: string; // hex '#rrggbb'
+  strokeWidth?: number; // px
+  fillColor?: string;   // hex '#rrggbb'
+  fillOpacity?: number; // 0..1
+  pointRadius?: number; // px
+}
 
 // Chaves para localStorage
 const EDIT_LAYER_STORAGE_KEY = 'sisgeti_edit_layer_features';
@@ -169,6 +183,11 @@ export default function MapViewer() {
   const heatmapCacheRef = useRef<Record<string, Heatmap>>({});
   // Cache para fontes de cluster (quando aplicável)
   const clusterSourceCacheRef = useRef<Record<string, Cluster>>({});
+  // Peso do heatmap por camada
+  const heatmapWeightSpecRef = useRef<Record<string, WeightSpec | null>>({});
+  const originalFeaturesRef = useRef<Record<string, Feature[]>>({});
+  const geoAttributePredicateRef = useRef<Record<string, CompiledPredicate | null>>({});
+  
   
   // Coordenadas padrão
   const defaultCenter = [-54.62, -20.44]; // Campo Grande, MS
@@ -313,18 +332,34 @@ export default function MapViewer() {
 
       const vectorSource = new VectorSource({ features });
 
+      const createVectorStyle = (sty?: LayerStyle) => {
+        const strokeColor = sty?.strokeColor || '#ff0000';
+        const fillColor = sty?.fillColor || '#ff0000';
+        const fillOpacity = typeof sty?.fillOpacity === 'number' ? Math.max(0, Math.min(1, sty!.fillOpacity!)) : 0.2;
+        const strokeWidth = sty?.strokeWidth || 2;
+        const pointRadius = typeof sty?.pointRadius === 'number' ? sty!.pointRadius! : Math.max(3, Math.min(20, (sty?.strokeWidth || 2) * 2));
+        return new Style({
+          fill: new Fill({ color: hexToRgba(fillColor, fillOpacity) }),
+          stroke: new Stroke({ color: strokeColor, width: strokeWidth }),
+          image: new CircleStyle({ radius: pointRadius, fill: new Fill({ color: strokeColor }) }),
+        });
+      };
+
       if (shouldCluster) {
         const clusterDistanceDefault = 40;
         const clusterSource = new Cluster({ distance: clusterDistanceDefault, source: vectorSource });
-        const styleCache: Record<number, Style> = {};
+        const styleCache: Record<string, Style> = {};
         const clusterStyleFn = (feature: any) => {
           const size = feature.get('features')?.length || 1;
-          if (!styleCache[size]) {
-            const radius = Math.max(6, Math.min(24, 6 + Math.log(size + 1) * 4));
-            styleCache[size] = new Style({
+          const baseColor = (layerData.style?.strokeColor || layerData.style?.fillColor || '#dc2626');
+          const radiusBoost = Math.max(0, (layerData.style?.pointRadius ?? (layerData.style?.strokeWidth ? layerData.style!.strokeWidth! * 2 : 0)));
+          const key = `${size}-${baseColor}-${radiusBoost}`;
+          if (!styleCache[key]) {
+            const radius = Math.max(6, Math.min(28, 6 + Math.log(size + 1) * 4 + radiusBoost));
+            styleCache[key] = new Style({
               image: new CircleStyle({
                 radius,
-                fill: new Fill({ color: 'rgba(220, 38, 38, 0.7)' }),
+                fill: new Fill({ color: hexToRgba(baseColor, 0.7) }),
                 stroke: new Stroke({ color: '#ffffff', width: 2 })
               }),
               text: size > 1 ? new TextStyle({
@@ -334,7 +369,7 @@ export default function MapViewer() {
               }) : undefined
             });
           }
-          return styleCache[size];
+          return styleCache[key];
         };
         newOlLayer = new VectorLayer({
           source: clusterSource as unknown as VectorSource,
@@ -348,11 +383,7 @@ export default function MapViewer() {
       } else {
         newOlLayer = new VectorLayer({
           source: vectorSource,
-          style: new Style({
-            fill: new Fill({ color: 'rgba(255, 0, 0, 0.2)' }),
-            stroke: new Stroke({ color: '#ff0000', width: 2 }),
-            image: new CircleStyle({ radius: 5, fill: new Fill({ color: '#ff0000' }) }),
-          }),
+          style: createVectorStyle(layerData.style),
           visible: layerData.visible,
           opacity: layerData.opacity,
           zIndex: 50,
@@ -376,6 +407,185 @@ export default function MapViewer() {
     
     return null;
   }, []);
+
+  // Atualizar estilo de uma camada (GeoJSON)
+  const updateLayerStyle = (id: string, style: LayerStyle) => {
+    const target = layers.find(l => l.id === id);
+    const merged: LayerStyle = { ...(target?.style || {}), ...style };
+    // Atualiza OL imediatamente
+    const olLayer = layerCacheRef.current[id];
+    if (olLayer && olLayer instanceof VectorLayer) {
+      const srcAny: any = (olLayer as VectorLayer<any>).getSource();
+      const isCluster = srcAny && typeof srcAny.getSource === 'function';
+      if (isCluster) {
+        const baseColor = merged.strokeColor || merged.fillColor || '#dc2626';
+        const styleCache: Record<string, Style> = {};
+        const clusterStyleFn = (feature: any) => {
+          const size = feature.get('features')?.length || 1;
+          const radiusBoost = Math.max(0, (merged.pointRadius ?? (merged.strokeWidth ? merged.strokeWidth * 2 : 0)));
+          const key = `${size}-${baseColor}-${radiusBoost}`;
+          if (!styleCache[key]) {
+            const radius = Math.max(6, Math.min(28, 6 + Math.log(size + 1) * 4 + radiusBoost));
+            styleCache[key] = new Style({
+              image: new CircleStyle({
+                radius,
+                fill: new Fill({ color: hexToRgba(baseColor, 0.7) }),
+                stroke: new Stroke({ color: '#ffffff', width: 2 })
+              }),
+              text: size > 1 ? new TextStyle({
+                text: String(size),
+                fill: new Fill({ color: '#ffffff' }),
+                stroke: new Stroke({ color: 'rgba(0,0,0,0.6)', width: 2 })
+              }) : undefined
+            });
+          }
+          return styleCache[key];
+        };
+        (olLayer as any).setStyle(clusterStyleFn);
+      } else {
+        const strokeColor = merged.strokeColor || '#ff0000';
+        const fillColor = merged.fillColor || '#ff0000';
+        const fillOpacity = typeof merged.fillOpacity === 'number' ? Math.max(0, Math.min(1, merged.fillOpacity!)) : 0.2;
+        const strokeWidth = merged.strokeWidth || 2;
+        const pointRadius = typeof merged.pointRadius === 'number' ? merged.pointRadius : Math.max(3, Math.min(20, strokeWidth * 2));
+        const st = new Style({
+          fill: new Fill({ color: hexToRgba(fillColor, fillOpacity) }),
+          stroke: new Stroke({ color: strokeColor, width: strokeWidth }),
+          image: new CircleStyle({ radius: pointRadius, fill: new Fill({ color: strokeColor }) }),
+        });
+        (olLayer as any).setStyle(st);
+      }
+    }
+    // Atualiza estado
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, style: merged } : l));
+  };
+
+  // Aplicar filtro CQL em uma camada WMS
+  const applyWmsFilter = (id: string, cql: string) => {
+    const olLayer = layerCacheRef.current[id];
+    if (!olLayer || !(olLayer instanceof TileLayer)) return;
+    const source = olLayer.getSource();
+    if (!(source instanceof TileWMS)) return;
+    try {
+      const params: any = (source as any).getParams ? (source as any).getParams() : {};
+      const val = (cql || '').trim();
+      if (val) params.CQL_FILTER = val; else delete params.CQL_FILTER;
+      (source as any).updateParams ? (source as any).updateParams(params) : null;
+    } catch (e) {
+      console.error('Falha ao aplicar CQL_FILTER:', e);
+    }
+  };
+
+  // Aplicar filtro por atributos (client-side) em uma camada GeoJSON
+  const applyGeoAttributeFilter = (id: string, query: string) => {
+    const olLayer = layerCacheRef.current[id];
+    if (!olLayer || !(olLayer instanceof VectorLayer)) return;
+    const srcAny: any = (olLayer as VectorLayer<any>).getSource();
+    const baseSource: VectorSource = (srcAny && typeof srcAny.getSource === 'function') ? srcAny.getSource() : srcAny;
+    if (!baseSource) return;
+    if (!originalFeaturesRef.current[id]) {
+      originalFeaturesRef.current[id] = baseSource.getFeatures().slice();
+    }
+    const all = originalFeaturesRef.current[id];
+    // Compila predicado robusto (fallback para tokenização simples)
+    let compiled: CompiledPredicate | null = null;
+    const q = (query || '').trim();
+    if (q) {
+      try {
+        compiled = compilePredicate(q);
+      } catch {
+        compiled = null;
+      }
+    }
+    geoAttributePredicateRef.current[id] = compiled;
+    let filtered: Feature[] = all;
+    if (compiled) {
+      filtered = all.filter((f) => {
+        const props = { ...f.getProperties() } as Record<string, any>;
+        delete (props as any).geometry;
+        return compiled!(props);
+      });
+    } else if (q) {
+      // fallback: tokenização
+      const tokens = tokenize(q);
+      filtered = all.filter((f) => {
+        const props = { ...f.getProperties() } as Record<string, any>;
+        delete (props as any).geometry;
+        const values: string[] = [];
+        for (const k of Object.keys(props)) {
+          const v = props[k];
+          if (v == null) continue;
+          if (typeof v === 'object') {
+            try { values.push(JSON.stringify(v)); } catch {}
+          } else {
+            values.push(String(v));
+          }
+        }
+        const search = normalizeText(values.join(' | '));
+        return matchAllTokens(search, tokens);
+      });
+    }
+    baseSource.clear();
+    baseSource.addFeatures(filtered as any);
+    // Atualiza contador no estado React
+    setLayers(prev => prev.map(l => l.id === id ? { ...l, featureCount: filtered.length } : l));
+  };
+
+  // Definir peso de heatmap (campo/expressão normalizada)
+  const applyHeatmapWeight = (id: string, spec: WeightSpec | null) => {
+    heatmapWeightSpecRef.current[id] = spec;
+    const heat = heatmapCacheRef.current[id];
+    if (!heat) return;
+    if (!spec) { (heat as any).setWeight ? (heat as any).setWeight(undefined) : null; return; }
+    const weightFn = makeWeighter(spec);
+    try {
+      // OpenLayers Heatmap aceita uma função weight via feature.get('weight') ou style function
+      // Use setWeight para apontar uma função que lê a propriedade 'weight'
+      // Aqui atribuiremos 'weight' nas features do source
+      const src = heat.getSource();
+      const feats = src?.getFeatures?.() || [];
+      for (const f of feats) {
+        const props = { ...f.getProperties() } as Record<string, any>;
+        delete (props as any).geometry;
+        const w = weightFn(props);
+        f.set('weight', w);
+      }
+      (heat as any).setWeight?.((feature: any) => feature.get('weight') ?? 1);
+      heat.changed();
+    } catch (e) {
+      console.error('Falha ao aplicar peso do heatmap:', e);
+    }
+  };
+
+  function hexToRgba(hex: string, alpha: number): string {
+    let h = hex.replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    const r = parseInt(h.substring(0, 2), 16);
+    const g = parseInt(h.substring(2, 4), 16);
+    const b = parseInt(h.substring(4, 6), 16);
+    const a = Math.max(0, Math.min(1, alpha));
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+
+  // Heatmap weights application
+  function applyHeatmapWeightsToSource(src: any, spec: WeightSpec | null) {
+    try {
+      const feats = src?.getFeatures?.() || [];
+      if (!Array.isArray(feats)) return;
+      if (!spec) {
+        feats.forEach((f: any) => { try { f.set('weight', 1); } catch {} });
+        return;
+      }
+      const weightFn = makeWeighter(spec);
+      feats.forEach((f: any) => {
+        try {
+          const props = f.getProperties ? f.getProperties() : (f.properties || {});
+          const w = weightFn(props || {});
+          f.set('weight', Math.max(0, Math.min(1, Number.isFinite(w) ? w : 0)));
+        } catch {}
+      });
+    } catch {}
+  }
 
   // Inicializa o mapa OpenLayers
   useEffect(() => {
@@ -1010,6 +1220,38 @@ export default function MapViewer() {
     window.addEventListener('exportMapPNG', handleExportMapPng);
     window.addEventListener('resetView', handleResetViewEvent);
     window.addEventListener('toggleIdentify', handleToggleIdentify as EventListener);
+    // novo: aplicar peso de heatmap
+    const onFilterByViewport = (ev: Event) => {
+      try {
+        const { id } = (ev as CustomEvent).detail || {};
+        const olLayer = layerCacheRef.current[id];
+        if (!mapInstance.current || !olLayer || !(olLayer instanceof VectorLayer)) return;
+        const srcAny: any = (olLayer as VectorLayer<any>).getSource();
+        const baseSource: VectorSource = (srcAny && typeof srcAny.getSource === 'function') ? srcAny.getSource() : srcAny;
+        if (!baseSource) return;
+        if (!originalFeaturesRef.current[id]) {
+          originalFeaturesRef.current[id] = baseSource.getFeatures().slice();
+        }
+        const all = originalFeaturesRef.current[id];
+        const view = mapInstance.current.getView();
+        const extent = view.calculateExtent(mapInstance.current.getSize());
+        const filtered = all.filter((f: any) => {
+          const g = f.getGeometry?.();
+          return g ? intersects(extent, g.getExtent()) : false;
+        });
+        baseSource.clear();
+        baseSource.addFeatures(filtered as any);
+        setLayers(prev => prev.map(l => l.id === id ? { ...l, featureCount: filtered.length } : l));
+      } catch {}
+    };
+    window.addEventListener('filterByViewport' as any, onFilterByViewport as any);
+    const onApplyHeatWeight = (ev: Event) => {
+      try {
+        const { id, spec } = (ev as CustomEvent).detail || {};
+        applyHeatmapWeight(id, spec || null);
+      } catch {}
+    };
+    window.addEventListener('applyHeatmapWeight' as any, onApplyHeatWeight as any);
     // limpar ferramentas (desativar edição, medição e seleção)
     const handleClearTools = () => {
       setEditActive(false);
@@ -1043,6 +1285,8 @@ export default function MapViewer() {
       window.removeEventListener('resetView', handleResetViewEvent);
       window.removeEventListener('toggleIdentify', handleToggleIdentify as EventListener);
       window.removeEventListener('clearTools', handleClearTools);
+      window.removeEventListener('applyHeatmapWeight' as any, onApplyHeatWeight as any);
+      window.removeEventListener('filterByViewport' as any, onFilterByViewport as any);
     };
   }, []);
 
@@ -1648,6 +1892,7 @@ export default function MapViewer() {
         onMoveLayerUp={moveLayerUp}
         onMoveLayerDown={moveLayerDown}
         onZoomToLayer={zoomToLayer}
+        onUpdateStyle={updateLayerStyle}
         onClusterDistanceChange={(id, distance) => {
           const cluster = clusterSourceCacheRef.current[id];
           if (cluster) {
@@ -1667,12 +1912,19 @@ export default function MapViewer() {
           const srcAny: any = (baseLayer as VectorLayer<any>).getSource();
           const src = (srcAny && typeof srcAny.getSource === 'function') ? srcAny.getSource() : srcAny;
           if (!src) return;
+          // Aplicar pesos atuais (se houver)
+          try {
+            const spec = heatmapWeightSpecRef.current[id] || null;
+            applyHeatmapWeightsToSource(src, spec);
+          } catch {}
           const heat = new Heatmap({ source: src, blur: 12, radius: 8, zIndex: 49 });
           heatmapCacheRef.current[id] = heat;
           map.addLayer(heat);
         }}
         isDark={isDarkTheme}
         highlight={highlightLayerManager}
+        onApplyWmsFilter={applyWmsFilter}
+        onApplyGeoAttributeFilter={applyGeoAttributeFilter}
         onSimplifyLayer={async (id: string) => {
           try {
             const olLayer = layerCacheRef.current[id];

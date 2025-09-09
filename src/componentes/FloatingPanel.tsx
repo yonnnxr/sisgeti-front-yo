@@ -9,7 +9,6 @@ interface FloatingPanelProps {
   title: string;
   panelId: string;
   width?: number;
-  height?: number;
   minWidth?: number;
   minHeight?: number;
   defaultPosition?: DefaultCorner;
@@ -31,7 +30,6 @@ export default function FloatingPanel({
   title,
   panelId,
   width = 320,
-  height,
   minWidth = 240,
   minHeight = 80,
   defaultPosition = "top-left",
@@ -51,9 +49,9 @@ export default function FloatingPanel({
   const [position, setPosition] = useState<{ x: number; y: number }>({ x: 16, y: 16 });
   const [dragging, setDragging] = useState(false);
   const [minimized, setMinimized] = useState(false);
-  const [size, setSize] = useState<{ w: number; h: number }>({ w: width, h: Math.max(minHeight, height || minHeight) });
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: width, h: Math.max(minHeight, minHeight) });
   const [resizing, setResizing] = useState(false);
-  const fixedLayout = !!(resizable || height != null);
+  const fixedLayout = !!resizable;
 
   // Load persisted position / minimized state or compute defaults
   useEffect(() => {
@@ -71,7 +69,7 @@ export default function FloatingPanel({
           if (typeof saved?.w === 'number' && typeof saved?.h === 'number') {
             setSize({ w: saved.w, h: Math.max(minHeight, saved.h) });
           } else {
-            setSize({ w: width, h: Math.max(minHeight, height || minHeight) });
+            setSize({ w: width, h: Math.max(minHeight, minHeight) });
           }
         } else {
           setSize(s => ({ w: width, h: Math.max(minHeight, s.h) }));
@@ -85,7 +83,7 @@ export default function FloatingPanel({
       const parent = containerRef.current?.parentElement;
       const parentRect = parent?.getBoundingClientRect();
       const panelW = Math.max(minWidth, Math.min((parentRect?.width || width), width));
-      const panelH = Math.max(minHeight, Math.min((parentRect?.height || (height || minHeight)), (height || minHeight)));
+      const panelH = Math.max(minHeight, Math.min((parentRect?.height || (minHeight)), (minHeight)));
       if (fixedLayout) setSize({ w: panelW, h: panelH }); else setSize(s => ({ w: panelW, h: s.h }));
       const px = Math.max(16, Math.min((initialPosition?.x ?? 16), (parentRect ? parentRect.width - panelW - 16 : 10000)));
       const py = Math.max(16, Math.min((initialPosition?.y ?? 16), (parentRect ? parentRect.height - panelH - 16 : 10000)));
@@ -99,7 +97,7 @@ export default function FloatingPanel({
         setPosition({ x, y });
       }
     });
-  }, [panelId, width, height, minWidth, minHeight, defaultPosition, initialPosition, persistPosition]);
+  }, [panelId, width, minWidth, minHeight, defaultPosition, initialPosition, persistPosition]);
 
   // Persist on change
   useEffect(() => {
